@@ -27,9 +27,9 @@ jobs:
             const fs = require('fs');
             const diff = fs.readFileSync('diff.txt', 'utf8');
 
-            const repo = process.env.GITHUB_REPOSITORY;
-            const sha = process.env.GITHUB_SHA;
-            const baseBranch = process.env.GITHUB_BASE_REF;
+            const repo = "${{ github.repository }}";
+            const sha = "${{ github.sha }}";
+            const baseBranch = "${{ github.event.pull_request.base.ref }}";
             const lines = diff.split('\n');
 
             let result = '';
@@ -89,10 +89,6 @@ jobs:
             } else {
               return 'false';
             }
-          env:
-            GITHUB_REPOSITORY: ${{ github.repository }}
-            GITHUB_SHA: ${{ github.sha }}
-            GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Output TODOs (if any)
         if: steps.search_todo.outputs.todo_found == 'true'
