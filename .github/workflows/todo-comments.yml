@@ -21,74 +21,78 @@ jobs:
 
       - name: Search for TODO comments with multiline and permalink support
         id: search_todo
-        run: |
-          # Initialize an empty file to store the TODO results
-          echo "" > todos_with_files.txt
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const diff = fs.readFileSync('diff.txt', 'utf8');
 
-          # Get the current commit SHA
-          commit_sha="${{ github.sha }}"
+            const repo = process.env.GITHUB_REPOSITORY;
+            const sha = process.env.GITHUB_SHA;
+            const baseBranch = process.env.GITHUB_BASE_REF;
+            const lines = diff.split('\n');
 
-          # Track file name and detect TODO comments, including multiline
-          current_file=""
-          in_multiline_todo=0
-          multiline_buffer=""
-          line_number=0
-          todo_start_line=0
+            let result = '';
+            let currentFile = '';
+            let inMultilineTodo = false;
+            let multilineBuffer = '';
+            let startLine = 0;
+            let lineNumber = 0;
 
-          while IFS= read -r line; do
-            # Increment line number
-            ((line_number++))
+            lines.forEach(line => {
+              if (line.startsWith('diff --git a/')) {
+                const filePathMatch = line.match(/^diff --git a\/(.*) b\/(.*)$/);
+                if (filePathMatch) {
+                  currentFile = filePathMatch[2];
+                  lineNumber = 0;  // Reset line number for the new file
+                }
+              } else if (line.startsWith('@@')) {
+                // Ignore chunk headers
+                return;
+              } else {
+                lineNumber++;
+              }
 
-            # Detect file changes in the diff output
-            if [[ "$line" =~ ^diff\ --git\ a\/(.*)\ b\/(.*) ]]; then
-              current_file=${BASH_REMATCH[2]}
-              echo "Processing file: $current_file"  # デバッグ: 処理中のファイルを出力
-              line_number=0  # Reset line number for the new file
-            elif [[ "$line" =~ ^@@ ]]; then
-              continue
-            fi
+              // Single line TODO
+              if (line.includes('TODO') && !line.includes('/*') && !line.includes('*/')) {
+                const permalink = `https://github.com/${repo}/blob/${sha}/${currentFile}#L${lineNumber}`;
+                result += `File: ${currentFile}\n${line}\nPermalink: ${permalink}\n\n`;
+              }
 
-            # Detect TODO comments (single line)
-            if [[ "$line" =~ TODO ]] && [[ ! "$line" =~ /\* ]] && [[ ! "$line" =~ \*/ ]]; then
-              permalink="https://github.com/${{ github.repository }}/blob/${commit_sha}/${current_file}#L${line_number}"
-              echo "Found TODO in $current_file at line $line_number"  # デバッグ: 発見されたTODOを表示
-              echo "File: $current_file" >> todos_with_files.txt
-              echo "$line" >> todos_with_files.txt
-              echo "Permalink: $permalink" >> todos_with_files.txt
-              echo "" >> todos_with_files.txt  # Add a blank line for readability
+              // Start of multiline TODO
+              if (line.includes('TODO') && line.includes('/*') && !line.includes('*/')) {
+                inMultilineTodo = true;
+                startLine = lineNumber;
+                multilineBuffer = `File: ${currentFile}\n${line}\n`;
+              }
 
-            # Detect start of multiline TODO (/* TODO ... */ or /* TODO ...)
-            elif [[ "$line" =~ TODO ]] && [[ "$line" =~ /\* ]] && [[ ! "$line" =~ \*/ ]]; then
-              in_multiline_todo=1
-              todo_start_line=$line_number
-              multiline_buffer="File: $current_file"$'\n'"$line"$'\n'
-            
-            # Detect end of multiline TODO (*/ closing)
-            elif [[ "$line" =~ \*/ ]] && [[ $in_multiline_todo -eq 1 ]]; then
-              in_multiline_todo=0
-              todo_end_line=$line_number
-              multiline_buffer+="$line"$'\n'
-              permalink="https://github.com/${{ github.repository }}/blob/${commit_sha}/${current_file}#L${todo_start_line}-L${todo_end_line}"
-              multiline_buffer+="Permalink: $permalink"$'\n'
-              echo "$multiline_buffer" >> todos_with_files.txt
-              echo "" >> todos_with_files.txt  # Add a blank line for readability
-              multiline_buffer=""
+              // End of multiline TODO
+              if (line.includes('*/') && inMultilineTodo) {
+                inMultilineTodo = false;
+                const endLine = lineNumber;
+                multilineBuffer += `${line}\n`;
+                const permalink = `https://github.com/${repo}/blob/${sha}/${currentFile}#L${startLine}-L${endLine}`;
+                multilineBuffer += `Permalink: ${permalink}\n\n`;
+                result += multilineBuffer;
+                multilineBuffer = '';
+              }
 
-            # Accumulate lines inside a multiline TODO comment
-            elif [[ $in_multiline_todo -eq 1 ]]; then
-              multiline_buffer+="$line"$'\n'
-            fi
-          done < diff.txt
+              // Accumulate lines inside a multiline TODO comment
+              if (inMultilineTodo) {
+                multilineBuffer += `${line}\n`;
+              }
+            });
 
-          # Debug: Output todos_with_files.txt
-          echo "Todos found:"
-          cat todos_with_files.txt  # デバッグ: ファイルの中身を出力
-
-          if [ -s todos_with_files.txt ]; then
-            echo "::set-output name=todo_found::true"
-          else
-            echo "::set-output name=todo_found::false"
-          fi
+            if (result) {
+              fs.writeFileSync('todos_with_files.txt', result);
+              return 'true';
+            } else {
+              return 'false';
+            }
+          env:
+            GITHUB_REPOSITORY: ${{ github.repository }}
+            GITHUB_SHA: ${{ github.sha }}
+            GITHUB_BASE_REF: ${{ github.event.pull_request.base.ref }}
 
       - name: Output TODOs (if any)
         if: steps.search_todo.outputs.todo_found == 'true'
