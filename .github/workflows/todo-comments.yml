@@ -1,4 +1,4 @@
-name: Check TODO comments in PR
+name: Check TODO Comments
 
 on:
   pull_request:
@@ -7,103 +7,133 @@ on:
 jobs:
   find-todo-comments:
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0 
+    - name: Checkout repository
+      uses: actions/checkout@v2
 
-      - name: Get diff with base branch
-        run: |
-          git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.cs' > diff.txt
-          echo "Diff generated:"
-          cat diff.txt  # デバッグ: Diffの出力を表示
+    - name: Get PR diff
+      id: diff
+      run: |
+        git fetch origin ${{ github.event.pull_request.base.ref }}
+        git diff origin/${{ github.event.pull_request.base.ref }} -U0 --diff-filter=AM -- '*.cs' | awk '
+          /^diff --git a\/.* b\/.*/ {
+              filename = substr($0, 14)
+              sub(/^a\//, "", filename)
+              sub(/ b\/.*/, "", filename)
+          }
+          /^@@ / {
+              split($0, arr, /[@+, -]+/)
+              start_line = arr[3]
+          }
+          /^\+/ && !/^\+\+\+/ {
+              print filename ":" start_line ":" substr($0, 2)
+              start_line++
+          }
+          ' > diff.txt
 
-      - name: Search for TODO comments with multiline and permalink support
-        id: search_todo
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const diff = fs.readFileSync('diff.txt', 'utf8');
+    - name: Extract TODO comments
+      uses: actions/github-script@v4
+      with:
+        script: |
+          const fs = require('fs');
+          const diff = fs.readFileSync('diff.txt', 'utf8');
+          const todoRegex = /TODO/g;
+          const startRegex = /\/\*/g;
+          const endRegex = /\*\//g;
+          const todos = [];
+          const lines = diff.split('\n');
+          let inTodoBlock = false;
+          let todoStartLine = 0;
+          let todoEndLine = 0;
+          let todoContent = [];
+          let multiLineComment = false;
+          let currentFile = '';
 
-            const repo = "${{ github.repository }}";
-            const sha = "${{ github.sha }}";
-            const baseBranch = "${{ github.event.pull_request.base.ref }}";
-            const lines = diff.split('\n');
+          lines.forEach((line, index) => {
+            const [fileName, lineNumber, ...content] = line.split(':');
+            if(fileName !== currentFile && currentFile) {
+              todos.push({
+                startLine: todoStartLine,
+                endLine: todoEndLine,
+                content: todoContent.join('\n'),
+                fileName: currentFile
+              });
+              multiLineComment = false;
+              todoContent = [];
+            }
+            currentFile = fileName;
 
-            let result = '';
-            let currentFile = '';
-            let inMultilineTodo = false;
-            let multilineBuffer = '';
-            let startLine = 0;
-            let lineNumber = 0;
-
-            lines.forEach(line => {
-              if (line.startsWith('diff --git a/')) {
-                const filePathMatch = line.match(/^diff --git a\/(.*) b\/(.*)$/);
-                if (filePathMatch) {
-                  currentFile = filePathMatch[2];
-                  lineNumber = 0;  // Reset line number for the new file
-                }
-              } else if (line.startsWith('@@')) {
-                // Ignore chunk headers
-                return;
-              } else {
-                lineNumber++;
-              }
-
-              // Single line TODO
-              if (line.includes('TODO') && !line.includes('/*') && !line.includes('*/')) {
-                const permalink = `https://github.com/${repo}/blob/${sha}/${currentFile}#L${lineNumber}`;
-                result += `File: ${currentFile}\n${line}\nPermalink: ${permalink}\n\n`;
-              }
-
-              // Start of multiline TODO
-              if (line.includes('TODO') && line.includes('/*') && !line.includes('*/')) {
-                inMultilineTodo = true;
-                startLine = lineNumber;
-                multilineBuffer = `File: ${currentFile}\n${line}\n`;
-              }
-
-              // End of multiline TODO
-              if (line.includes('*/') && inMultilineTodo) {
-                inMultilineTodo = false;
-                const endLine = lineNumber;
-                multilineBuffer += `${line}\n`;
-                const permalink = `https://github.com/${repo}/blob/${sha}/${currentFile}#L${startLine}-L${endLine}`;
-                multilineBuffer += `Permalink: ${permalink}\n\n`;
-                result += multilineBuffer;
-                multilineBuffer = '';
-              }
-
-              // Accumulate lines inside a multiline TODO comment
-              if (inMultilineTodo) {
-                multilineBuffer += `${line}\n`;
-              }
-            });
-
-            if (result) {
-              fs.writeFileSync('todos_with_files.txt', result);
-              return 'true';
-            } else {
-              return 'false';
+            const lineContent = content.join(':');
+            if (startRegex.test(lineContent)) {
+              multiLineComment = true;
             }
 
-      - name: Output TODOs (if any)
-        if: steps.search_todo.outputs.todo_found == 'true'
-        run: cat todos_with_files.txt
+            if (endRegex.test(lineContent)) {
+              multiLineComment = false;
+              if (inTodoBlock) {
+                inTodoBlock = false;
+                todos.push({
+                  startLine: todoStartLine,
+                  endLine: parseInt(lineNumber),
+                  content: todoContent.join('\n'),
+                  fileName: currentFile
+                });
+                todoContent = [];
+              }
+              return;
+            }
 
-      - name: Comment on PR
-        if: steps.search_todo.outputs.todo_found == 'true'
-        uses: actions/github-script@v6
-        with:
-          script: |
-            const fs = require('fs');
-            const todos = fs.readFileSync('todos_with_files.txt', 'utf8');
+            if (todoRegex.test(lineContent)) {
+              if (!inTodoBlock) {
+                inTodoBlock = true;
+                todoStartLine = parseInt(lineNumber);
+              }
+              todoEndLine = parseInt(lineNumber);
+              todoContent.push(lineContent);
+            } else if (inTodoBlock && (lineContent.trim().startsWith("//") || multiLineComment)) {
+              todoEndLine = parseInt(lineNumber);
+              todoContent.push(lineContent);
+            } else if (inTodoBlock) {
+              inTodoBlock = false;
+              todos.push({
+                startLine: todoStartLine,
+                endLine: todoEndLine,
+                content: todoContent.join('\n'),
+                fileName: currentFile
+              });
+              todoContent = [];
+            }
+          });
+
+          if (inTodoBlock && currentFile) {
+            todos.push({
+              startLine: todoStartLine,
+              endLine: todoEndLine,
+              content: todoContent.join('\n'),
+              fileName: currentFile
+            });
+          }
+
+          # const todosOutput = todos.map(todo => `${todo.fileName}:${todo.startLine}-${todo.endLine}:${todo.content}`).join('\n');
+          fs.writeFileSync('todos.json', JSON.stringify(todos));
+          # return { todos: todosOutput };
+
+    - name: Comment on PR
+      uses: actions/github-script@v4
+      with:
+        script: |
+          const fs = require('fs');
+          const todos = JSON.parse(fs.readFileSync('todos.json', 'utf8'));
+          if (todos) {
+            const lines = todos.split('\n').filter(line => line.trim() !== '');
+            const commentBody = todos.map(item => {
+              return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine}-L${item.endLine}`;
+            }).join('\n');
             github.rest.issues.createComment({
-              issue_number: context.payload.pull_request.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body: `The following TODO comments were found:\n\n${todos}`
-            })
+              issue_number: ${{ github.event.pull_request.number }},
+              owner: ${{ github.repository.split('/')[0] }},
+              repo: ${{ github.repository.split('/')[1] }},
+              body: `以下のTODOコメントが見つかりました:\n\n${commentBody}`
+            });
+          }
