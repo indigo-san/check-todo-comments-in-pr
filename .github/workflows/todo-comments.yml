@@ -126,14 +126,14 @@ jobs:
           const fs = require('fs');
           const todos = JSON.parse(fs.readFileSync('todos.json', 'utf8'));
           if (todos) {
-            const lines = todos.split('\n').filter(line => line.trim() !== '');
             const commentBody = todos.map(item => {
               return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine}-L${item.endLine}`;
             }).join('\n');
+            const {owner, repo} = process.env;
             github.rest.issues.createComment({
               issue_number: ${{ github.event.pull_request.number }},
-              owner: ${{ github.repository.split('/')[0] }},
-              repo: ${{ github.repository.split('/')[1] }},
+              owner: context.repo.owner,
+              repo: context.repo.repo,
               body: `以下のTODOコメントが見つかりました:\n\n${commentBody}`
             });
           }
