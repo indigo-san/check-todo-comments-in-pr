@@ -25,7 +25,7 @@ jobs:
           echo "" > todos_with_files.txt
 
           # Get the current commit SHA
-          commit_sha=$(git rev-parse HEAD)
+          commit_sha="${{ github.sha }}"
 
           # Track file name and detect TODO comments, including multiline
           current_file=""
