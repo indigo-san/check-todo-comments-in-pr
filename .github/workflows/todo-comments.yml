@@ -16,6 +16,8 @@ jobs:
       - name: Get diff with base branch
         run: git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.cs' > diff.txt
 
+      - run: cat diff.txt
+
       - name: Search for TODO comments with multiline and permalink support
         id: search_todo
         run: |
