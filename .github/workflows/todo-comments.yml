@@ -1,0 +1,98 @@
+name: Check TODO comments in PR
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  find-todo-comments:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      - name: Get diff with base branch
+        run: git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.js' '*.ts' '*.py' > diff.txt
+
+      - name: Search for TODO comments with multiline and permalink support
+        id: search_todo
+        run: |
+          # Initialize an empty file to store the TODO results
+          echo "" > todos_with_files.txt
+
+          # Get the current commit SHA
+          commit_sha=$(git rev-parse HEAD)
+
+          # Track file name and detect TODO comments, including multiline
+          current_file=""
+          in_multiline_todo=0
+          multiline_buffer=""
+          line_number=0
+          todo_start_line=0
+
+          while IFS= read -r line; do
+            # Detect file changes in the diff output
+            if [[ "$line" =~ ^diff\ --git\ a\/(.*)\ b\/(.*) ]]; then
+              current_file=${BASH_REMATCH[2]}
+              line_number=0  # Reset line number for the new file
+            elif [[ "$line" =~ ^@@ ]]; then
+              # Ignore the chunk headers
+              continue
+            else
+              ((line_number++))
+            fi
+
+            # Detect TODO comments (single line)
+            if [[ "$line" =~ TODO ]] && [[ ! "$line" =~ /\* ]] && [[ ! "$line" =~ \*/ ]]; then
+              permalink="https://github.com/${{ github.repository }}/blob/${commit_sha}/${current_file}#L${line_number}"
+              echo "File: $current_file" >> todos_with_files.txt
+              echo "$line" >> todos_with_files.txt
+              echo "Permalink: $permalink" >> todos_with_files.txt
+              echo "" >> todos_with_files.txt  # Add a blank line for readability
+
+            # Detect start of multiline TODO (/* TODO ... */ or /* TODO ...)
+            elif [[ "$line" =~ TODO ]] && [[ "$line" =~ /\* ]] && [[ ! "$line" =~ \*/ ]]; then
+              in_multiline_todo=1
+              todo_start_line=$line_number
+              multiline_buffer="File: $current_file"$'\n'"$line"$'\n'
+            
+            # Detect end of multiline TODO (*/ closing)
+            elif [[ "$line" =~ \*/ ]] && [[ $in_multiline_todo -eq 1 ]]; then
+              in_multiline_todo=0
+              todo_end_line=$line_number
+              multiline_buffer+="$line"$'\n'
+              permalink="https://github.com/${{ github.repository }}/blob/${commit_sha}/${current_file}#L${todo_start_line}-L${todo_end_line}"
+              multiline_buffer+="Permalink: $permalink"$'\n'
+              echo "$multiline_buffer" >> todos_with_files.txt
+              echo "" >> todos_with_files.txt  # Add a blank line for readability
+              multiline_buffer=""
+
+            # Accumulate lines inside a multiline TODO comment
+            elif [[ $in_multiline_todo -eq 1 ]]; then
+              multiline_buffer+="$line"$'\n'
+            fi
+          done < diff.txt
+
+          if [ -s todos_with_files.txt ]; then
+            echo "::set-output name=todo_found::true"
+          else
+            echo "::set-output name=todo_found::false"
+          fi
+
+      - name: Output TODOs (if any)
+        if: steps.search_todo.outputs.todo_found == 'true'
+        run: cat todos_with_files.txt
+
+      - name: Comment on PR
+        if: steps.search_todo.outputs.todo_found == 'true'
+        uses: actions/github-script@v6
+        with:
+          script: |
+            const fs = require('fs');
+            const todos = fs.readFileSync('todos_with_files.txt', 'utf8');
+            github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `The following TODO comments were found:\n\n${todos}`
+            })
