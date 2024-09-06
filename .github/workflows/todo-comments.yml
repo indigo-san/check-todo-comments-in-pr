@@ -10,9 +10,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 
 
       - name: Get diff with base branch
-        run: git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.js' '*.ts' '*.py' > diff.txt
+        run: git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.cs' > diff.txt
 
       - name: Search for TODO comments with multiline and permalink support
         id: search_todo
