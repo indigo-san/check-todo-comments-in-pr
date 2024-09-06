@@ -14,9 +14,10 @@ jobs:
           fetch-depth: 0 
 
       - name: Get diff with base branch
-        run: git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.cs' > diff.txt
-
-      - run: cat diff.txt
+        run: |
+          git diff origin/${{ github.event.pull_request.base.ref }} --diff-filter=AM -- '*.cs' > diff.txt
+          echo "Diff generated:"
+          cat diff.txt  # デバッグ: Diffの出力を表示
 
       - name: Search for TODO comments with multiline and permalink support
         id: search_todo
@@ -35,20 +36,22 @@ jobs:
           todo_start_line=0
 
           while IFS= read -r line; do
+            # Increment line number
+            ((line_number++))
+
             # Detect file changes in the diff output
             if [[ "$line" =~ ^diff\ --git\ a\/(.*)\ b\/(.*) ]]; then
               current_file=${BASH_REMATCH[2]}
+              echo "Processing file: $current_file"  # デバッグ: 処理中のファイルを出力
               line_number=0  # Reset line number for the new file
             elif [[ "$line" =~ ^@@ ]]; then
-              # Ignore the chunk headers
               continue
-            else
-              ((line_number++))
             fi
 
             # Detect TODO comments (single line)
             if [[ "$line" =~ TODO ]] && [[ ! "$line" =~ /\* ]] && [[ ! "$line" =~ \*/ ]]; then
               permalink="https://github.com/${{ github.repository }}/blob/${commit_sha}/${current_file}#L${line_number}"
+              echo "Found TODO in $current_file at line $line_number"  # デバッグ: 発見されたTODOを表示
               echo "File: $current_file" >> todos_with_files.txt
               echo "$line" >> todos_with_files.txt
               echo "Permalink: $permalink" >> todos_with_files.txt
@@ -76,6 +79,10 @@ jobs:
               multiline_buffer+="$line"$'\n'
             fi
           done < diff.txt
+
+          # Debug: Output todos_with_files.txt
+          echo "Todos found:"
+          cat todos_with_files.txt  # デバッグ: ファイルの中身を出力
 
           if [ -s todos_with_files.txt ]; then
             echo "::set-output name=todo_found::true"
