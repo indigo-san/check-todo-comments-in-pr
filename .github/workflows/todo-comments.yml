@@ -34,7 +34,6 @@ jobs:
 
     - name: Extract TODO comments
       uses: actions/github-script@v4
-      id: extract-todo-comments
       with:
         script: |
           const fs = require('fs');
@@ -124,12 +123,11 @@ jobs:
           const commentBody = todos.map(item => {
             return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine}-L${item.endLine}`;
           }).join('\n');
-          return { commentBody: `以下のTODOコメントが見つかりました:\n\n${commentBody}` };
+          fs.writeFileSync('todos.md', `以下のTODOコメントが見つかりました:\n\n${commentBody}`);
 
     - name: Comment on PR
     - uses: marocchino/sticky-pull-request-comment@v2
       with:
         header: todo-cooments
         recreate: true
-        message: |
-          ${{ steps.extract-todo-comments.outputs.commentBody }}
+        path: todos.md
