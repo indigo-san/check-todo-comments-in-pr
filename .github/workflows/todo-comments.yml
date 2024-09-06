@@ -66,13 +66,17 @@ jobs:
               return;
             }
             const [fileName, lineNumber, ...content] = line.split(':');
-            if(fileName !== currentFile && currentFile) {
-              todos.push({
-                startLine: todoStartLine,
-                endLine: todoEndLine,
-                content: todoContent.join('\n'),
-                fileName: currentFile
-              });
+            if (fileName !== currentFile && currentFile) {
+              if (todoContent.length) {
+                todos.push({
+                  startLine: todoStartLine,
+                  endLine: todoEndLine,
+                  content: todoContent.join('\n'),
+                  fileName: currentFile
+                });
+                inTodoBlock = false;
+                multiLineComment = false;
+              }
               inTodoBlock = false;
               multiLineComment = false;
               todoContent = [];
