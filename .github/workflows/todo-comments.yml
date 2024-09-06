@@ -132,7 +132,7 @@ jobs:
           }
 
           const commentBody = todos.map(item => {
-            return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine + 1}-L${item.endLine + 1}`;
+            return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine}-L${item.endLine}`;
           }).join('\n');
           fs.writeFileSync('todos.md', `以下のTODOコメントが見つかりました:\n\n${commentBody}`);
 
