@@ -115,9 +115,7 @@ jobs:
             });
           }
 
-          # const todosOutput = todos.map(todo => `${todo.fileName}:${todo.startLine}-${todo.endLine}:${todo.content}`).join('\n');
           fs.writeFileSync('todos.json', JSON.stringify(todos));
-          # return { todos: todosOutput };
 
     - name: Comment on PR
       uses: actions/github-script@v4
