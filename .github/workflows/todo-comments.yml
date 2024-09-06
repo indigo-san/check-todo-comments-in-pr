@@ -118,7 +118,7 @@ jobs:
           fs.writeFileSync('todos.json', JSON.stringify(todos));
 
     - name: Comment on PR
-      uses: actions/github-script@v4
+      uses: actions/github-script@v7
       with:
         script: |
           const fs = require('fs');
@@ -127,9 +127,8 @@ jobs:
             const commentBody = todos.map(item => {
               return `https://github.com/${{ github.repository }}/blob/${{ github.sha }}/${item.fileName}#L${item.startLine}-L${item.endLine}`;
             }).join('\n');
-            const {owner, repo} = process.env;
-            github.rest.issues.createComment({
-              issue_number: ${{ github.event.pull_request.number }},
+            await github.rest.issues.createComment({
+              issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
               body: `以下のTODOコメントが見つかりました:\n\n${commentBody}`
